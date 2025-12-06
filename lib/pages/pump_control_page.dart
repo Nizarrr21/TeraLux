@@ -23,6 +23,10 @@ class _PumpControlPageState extends State<PumpControlPage> {
 
   final TextEditingController _durationController = TextEditingController(text: '30');
   int _selectedDuration = 30; // Default 30 seconds
+  
+  // Local tracking untuk countdown
+  bool _localPumpRunning = false;
+  int _localRemainingSeconds = 0;
 
   // Data Step Response dari tabel (Detik, Volume ml)
   final List<Map<String, dynamic>> _stepResponseData = [
@@ -47,8 +51,17 @@ class _PumpControlPageState extends State<PumpControlPage> {
   void initState() {
     super.initState();
     widget.mqttService.onPumpStatusReceived = (status) {
+      print('📊 Pump Status Update: isRunning=${status.isRunning}, remaining=${status.remainingSeconds}');
       setState(() {
         _pumpStatus = status;
+        // Sync local status dengan ESP32
+        if (status.isRunning) {
+          _localPumpRunning = true;
+          _localRemainingSeconds = status.remainingSeconds;
+        } else {
+          _localPumpRunning = false;
+          _localRemainingSeconds = 0;
+        }
       });
     };
   }
@@ -111,6 +124,26 @@ class _PumpControlPageState extends State<PumpControlPage> {
   }
 
   void _handleStartPump() {
+    // Validasi durasi
+    if (_selectedDuration <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Masukkan durasi yang valid (1-300 detik)'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    
+    // Set local pump status langsung untuk UI responsif
+    setState(() {
+      _localPumpRunning = true;
+      _localRemainingSeconds = _selectedDuration;
+    });
+    
+    // Start local countdown timer
+    _startLocalCountdown();
+    
     // Send start command to ESP32 with MANUAL mode
     widget.mqttService.publishPumpControl("start",
         duration: _selectedDuration, manual: true);
@@ -123,8 +156,32 @@ class _PumpControlPageState extends State<PumpControlPage> {
       ),
     );
   }
+  
+  void _startLocalCountdown() {
+    Future.doWhile(() async {
+      await Future.delayed(const Duration(seconds: 1));
+      
+      if (!_localPumpRunning) return false;
+      
+      setState(() {
+        _localRemainingSeconds--;
+        if (_localRemainingSeconds <= 0) {
+          _localPumpRunning = false;
+          _localRemainingSeconds = 0;
+        }
+      });
+      
+      return _localPumpRunning;
+    });
+  }
 
   void _handleStopPump() {
+    // Stop local countdown
+    setState(() {
+      _localPumpRunning = false;
+      _localRemainingSeconds = 0;
+    });
+    
     // Send stop command to ESP32
     widget.mqttService.publishPumpControl("stop");
 
@@ -176,8 +233,27 @@ class _PumpControlPageState extends State<PumpControlPage> {
                 padding: const EdgeInsets.all(16.0),
                 child: Column(
                   children: [
-                    // Status Display
-                    if (_pumpStatus.isRunning)
+                    // Debug Info (hapus setelah testing)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'ESP: isRunning=${_pumpStatus.isRunning}, remaining=${_pumpStatus.remainingSeconds}\n'
+                        'Local: running=$_localPumpRunning, remaining=$_localRemainingSeconds',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    
+                    // Status Display - gunakan local status atau ESP32 status
+                    if (_localPumpRunning || _pumpStatus.isRunning)
                       Container(
                         margin: const EdgeInsets.only(bottom: 16),
                         padding: const EdgeInsets.all(20),
@@ -213,25 +289,89 @@ class _PumpControlPageState extends State<PumpControlPage> {
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 16),
-                            Text(
-                              '${_pumpStatus.remainingSeconds}',
-                              style: const TextStyle(
-                                fontSize: 48,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF2D5F3F),
+                            const SizedBox(height: 20),
+                            
+                            // Progress Indicator
+                            Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                SizedBox(
+                                  width: 120,
+                                  height: 120,
+                                  child: CircularProgressIndicator(
+                                    value: _selectedDuration > 0 
+                                        ? (_pumpStatus.isRunning 
+                                            ? _pumpStatus.remainingSeconds / _selectedDuration 
+                                            : _localRemainingSeconds / _selectedDuration)
+                                        : 0,
+                                    strokeWidth: 8,
+                                    backgroundColor: Colors.grey.shade200,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      const Color(0xFF2D5F3F),
+                                    ),
+                                  ),
+                                ),
+                                Column(
+                                  children: [
+                                    Text(
+                                      '${_pumpStatus.isRunning ? _pumpStatus.remainingSeconds : _localRemainingSeconds}',
+                                      style: const TextStyle(
+                                        fontSize: 42,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF2D5F3F),
+                                      ),
+                                    ),
+                                    const Text(
+                                      'detik',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            
+                            const SizedBox(height: 12),
+                            
+                            // Waktu info
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.timer_outlined,
+                                    size: 16,
+                                    color: Colors.grey.shade700,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '${_pumpStatus.isRunning 
+                                        ? (_selectedDuration - _pumpStatus.remainingSeconds) 
+                                        : (_selectedDuration - _localRemainingSeconds)} / $_selectedDuration detik',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.grey.shade700,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            const Text(
-                              'detik tersisa',
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: Colors.grey,
-                              ),
-                            ),
+                            
                             const SizedBox(height: 20),
                             const Divider(),
                             const SizedBox(height: 12),
+                            
                             // Real-time Water Output
                             Column(
                               children: [
@@ -243,7 +383,9 @@ class _PumpControlPageState extends State<PumpControlPage> {
                                 const SizedBox(height: 8),
                                 Text(
                                   _calculateWaterVolume(
-                                    (_selectedDuration - _pumpStatus.remainingSeconds).toDouble()
+                                    _pumpStatus.isRunning
+                                        ? (_selectedDuration - _pumpStatus.remainingSeconds).toDouble()
+                                        : (_selectedDuration - _localRemainingSeconds).toDouble()
                                   ).toStringAsFixed(1),
                                   style: TextStyle(
                                     fontSize: 32,
@@ -412,7 +554,7 @@ class _PumpControlPageState extends State<PumpControlPage> {
                             children: [
                               Expanded(
                                 child: ElevatedButton(
-                                  onPressed: (_pumpStatus.isRunning || _selectedDuration <= 0)
+                                  onPressed: (_localPumpRunning || _pumpStatus.isRunning || _selectedDuration <= 0)
                                       ? null
                                       : _handleStartPump,
                                   style: ElevatedButton.styleFrom(
@@ -442,7 +584,7 @@ class _PumpControlPageState extends State<PumpControlPage> {
                               const SizedBox(width: 12),
                               Expanded(
                                 child: ElevatedButton(
-                                  onPressed: !_pumpStatus.isRunning
+                                  onPressed: (!_localPumpRunning && !_pumpStatus.isRunning)
                                       ? null
                                       : _handleStopPump,
                                   style: ElevatedButton.styleFrom(

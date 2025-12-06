@@ -150,8 +150,9 @@ class MqttService {
           _checkAutoControl(sensorData);
         } else if (topic == topicPumpStatus) {
           // Status pompa dari ESP32
-          print('   ➜ Pump status parsed');
+          print('   ➜ Pump status parsed: $json');
           final pumpStatus = PumpControl.fromJson(json);
+          print('   ➜ isRunning=${pumpStatus.isRunning}, remaining=${pumpStatus.remainingSeconds}');
           onPumpStatusReceived?.call(pumpStatus);
         } else if (topic == topicLightStatus) {
           // Status lampu dari ESP32
