@@ -4,6 +4,7 @@ class PumpControlCard extends StatelessWidget {
   final bool isPumpOn;
   final bool isAutoMode;
   final int duration;
+  final bool isRunning;
   final Function(bool) onPumpToggle;
   final Function(bool) onModeToggle;
   final Function(int) onDurationChanged;
@@ -14,6 +15,7 @@ class PumpControlCard extends StatelessWidget {
     required this.isPumpOn,
     required this.isAutoMode,
     required this.duration,
+    required this.isRunning,
     required this.onPumpToggle,
     required this.onModeToggle,
     required this.onDurationChanged,
@@ -170,7 +172,7 @@ class PumpControlCard extends StatelessWidget {
             child: ElevatedButton(
               onPressed: isPumpOn ? onActivate : null,
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2D5F3F),
+                backgroundColor: isRunning ? Colors.red : const Color(0xFF2D5F3F),
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
@@ -178,12 +180,19 @@ class PumpControlCard extends StatelessWidget {
                 ),
                 disabledBackgroundColor: Colors.grey[400],
               ),
-              child: const Text(
-                'Aktifkan',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(isRunning ? Icons.stop : Icons.play_arrow),
+                  const SizedBox(width: 8),
+                  Text(
+                    isRunning ? 'Hentikan' : 'Aktifkan',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),

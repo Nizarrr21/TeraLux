@@ -1,40 +1,31 @@
 class SensorData {
-  final double temperature;
-  final double lightLevel; // Dalam Lux (setelah kalibrasi)
-  final double moistureLevel; // Dalam % (setelah kalibrasi)
+  final double lightLevel; // Dalam Lux (dari BH1750, tidak perlu kalibrasi)
+  final double moistureLevel; // Dalam % (setelah konversi)
   
-  // Nilai mentah dari sensor (sebelum kalibrasi)
-  final double? rawLightValue;
+  // Nilai mentah dari sensor (untuk soil moisture)
   final double? rawMoistureValue;
 
   SensorData({
-    required this.temperature,
     required this.lightLevel,
     required this.moistureLevel,
-    this.rawLightValue,
     this.rawMoistureValue,
   });
 
   // Factory constructor untuk parsing dari MQTT JSON
-  // Menerima nilai mentah dari Arduino
   factory SensorData.fromJson(Map<String, dynamic> json) {
     return SensorData(
-      temperature: (json['temperature'] ?? 0.0).toDouble(),
-      lightLevel: (json['light'] ?? 0.0).toDouble(),
-      moistureLevel: (json['moisture'] ?? 0.0).toDouble(),
-      rawLightValue: json['rawLight']?.toDouble(),
-      rawMoistureValue: json['rawMoisture']?.toDouble(),
+      lightLevel: (json['lightLevel'] ?? 0.0).toDouble(),
+      moistureLevel: (json['moistureLevel'] ?? 0.0).toDouble(),
+      rawMoistureValue: json['rawMoistureValue']?.toDouble(),
     );
   }
 
   // Convert ke JSON untuk mengirim data
   Map<String, dynamic> toJson() {
     return {
-      'temperature': temperature,
-      'light': lightLevel,
-      'moisture': moistureLevel,
-      if (rawLightValue != null) 'rawLight': rawLightValue,
-      if (rawMoistureValue != null) 'rawMoisture': rawMoistureValue,
+      'lightLevel': lightLevel,
+      'moistureLevel': moistureLevel,
+      if (rawMoistureValue != null) 'rawMoistureValue': rawMoistureValue,
     };
   }
 }

@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import '../models/sensor_data.dart';
 import '../services/mqtt_service.dart';
 import '../widgets/greeting_card.dart';
-import '../widgets/temperature_card.dart';
 import '../widgets/light_card.dart';
 import '../widgets/soil_moisture_card.dart';
 import 'pump_control_page.dart';
+import 'light_control_page.dart';
 import 'calibration_page.dart';
+import 'settings_page.dart';
+import 'mqtt_test_page.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -18,7 +20,6 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   final MqttService _mqttService = MqttService();
   SensorData _sensorData = SensorData(
-    temperature: 0.0,
     lightLevel: 0,
     moistureLevel: 0,
   );
@@ -95,6 +96,28 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                   const Spacer(),
                   IconButton(
+                    icon: const Icon(Icons.bug_report, color: Colors.white),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const MqttTestPage(),
+                        ),
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.settings, color: Colors.white),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const SettingsPage(),
+                        ),
+                      );
+                    },
+                  ),
+                  IconButton(
                     icon: const Icon(Icons.tune, color: Colors.white),
                     onPressed: () {
                       Navigator.push(
@@ -119,6 +142,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   children: [
                     // Greeting Card
                     GreetingCard(
+                      greeting: _getGreeting(),
                       username: 'Teman',
                       time: _getCurrentTime(),
                       date: _getCurrentDate(),
@@ -126,28 +150,15 @@ class _DashboardPageState extends State<DashboardPage> {
 
                     const SizedBox(height: 24),
 
-                    // Temperature Card
-                    TemperatureCard(
-                      temperature: _sensorData.temperature,
+                    // Light and Soil Moisture Cards (Full Width)
+                    LightCard(
+                      lightLevel: _sensorData.lightLevel,
                     ),
-
+                    
                     const SizedBox(height: 16),
-
-                    // Light and Soil Moisture Cards
-                    Row(
-                      children: [
-                        Expanded(
-                          child: LightCard(
-                            lightLevel: _sensorData.lightLevel,
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: SoilMoistureCard(
-                            moistureLevel: _sensorData.moistureLevel,
-                          ),
-                        ),
-                      ],
+                    
+                    SoilMoistureCard(
+                      moistureLevel: _sensorData.moistureLevel,
                     ),
                   ],
                 ),
@@ -170,6 +181,21 @@ class _DashboardPageState extends State<DashboardPage> {
                         context,
                         MaterialPageRoute(
                           builder: (context) => PumpControlPage(
+                            mqttService: _mqttService,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.lightbulb_outline, size: 32),
+                    color: Colors.white70,
+                    onPressed: () {
+                      // Navigate to light control
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => LightControlPage(
                             mqttService: _mqttService,
                           ),
                         ),

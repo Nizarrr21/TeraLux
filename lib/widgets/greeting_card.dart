@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
 class GreetingCard extends StatelessWidget {
+  final String greeting;
   final String username;
   final String time;
   final String date;
 
   const GreetingCard({
     super.key,
+    required this.greeting,
     required this.username,
     required this.time,
     required this.date,
@@ -32,7 +34,7 @@ class GreetingCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Selamat Pagi, $username!',
+                  'Selamat $greeting, $username!',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 16,

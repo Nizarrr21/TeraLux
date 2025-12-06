@@ -15,47 +15,15 @@ class CalibrationPage extends StatefulWidget {
 }
 
 class _CalibrationPageState extends State<CalibrationPage> {
-  final List<CalibrationPoint> _lightPoints = [];
-  final List<CalibrationPoint> _moisturePoints = [];
-
-  final TextEditingController _lightSensorController = TextEditingController();
-  final TextEditingController _lightActualController = TextEditingController();
-  final TextEditingController _moistureSensorController = TextEditingController();
-  final TextEditingController _moistureActualController = TextEditingController();
-
-  void _addLightCalibrationPoint() {
-    if (_lightSensorController.text.isNotEmpty &&
-        _lightActualController.text.isNotEmpty) {
-      setState(() {
-        _lightPoints.add(CalibrationPoint(
-          sensorValue: double.parse(_lightSensorController.text),
-          actualValue: double.parse(_lightActualController.text),
-        ));
-        _lightSensorController.clear();
-        _lightActualController.clear();
-      });
-    }
-  }
-
-  void _addMoistureCalibrationPoint() {
-    if (_moistureSensorController.text.isNotEmpty &&
-        _moistureActualController.text.isNotEmpty) {
-      setState(() {
-        _moisturePoints.add(CalibrationPoint(
-          sensorValue: double.parse(_moistureSensorController.text),
-          actualValue: double.parse(_moistureActualController.text),
-        ));
-        _moistureSensorController.clear();
-        _moistureActualController.clear();
-      });
-    }
-  }
+  // Soil Moisture Calibration Values
+  final TextEditingController _soilDryController = TextEditingController(text: '4095');
+  final TextEditingController _soilWetController = TextEditingController(text: '1500');
 
   void _applyCalibration() {
-    if (_lightPoints.length < 2 || _moisturePoints.length < 2) {
+    if (_soilDryController.text.isEmpty || _soilWetController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Minimal 2 titik kalibrasi untuk setiap sensor!'),
+          content: Text('Masukkan nilai Dry dan Wet untuk sensor kelembaban!'),
           backgroundColor: Colors.red,
         ),
       );
@@ -63,22 +31,46 @@ class _CalibrationPageState extends State<CalibrationPage> {
     }
 
     try {
-      final calibration = CalibrationData.fromMeasurements(
-        lightPoints: _lightPoints,
-        moisturePoints: _moisturePoints,
+      final soilDry = int.parse(_soilDryController.text);
+      final soilWet = int.parse(_soilWetController.text);
+
+      // Validasi
+      if (soilDry <= soilWet) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Nilai Dry harus lebih besar dari Wet!'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Update calibration di MqttService
+      final calibration = CalibrationData(
+        lightSlopeA: 1.0, // BH1750 tidak perlu kalibrasi
+        lightInterceptB: 0.0,
+        moistureSlopeA: 1.0,
+        moistureInterceptB: 0.0,
+        soilDryValue: soilDry,
+        soilWetValue: soilWet,
       );
 
       widget.mqttService.updateCalibration(calibration);
 
+      // Publish threshold settings dengan nilai kalibrasi baru
+      widget.mqttService.updateThresholdSettings(
+        widget.mqttService.thresholdSettings,
+      );
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Kalibrasi berhasil!\n'
-            'Cahaya: y = ${calibration.lightSlopeA.toStringAsFixed(3)}x + ${calibration.lightInterceptB.toStringAsFixed(2)}\n'
-            'Kelembaban: y = ${calibration.moistureSlopeA.toStringAsFixed(3)}x + ${calibration.moistureInterceptB.toStringAsFixed(2)}',
+            'Kalibrasi berhasil disimpan!\n'
+            'Dry: $soilDry | Wet: $soilWet\n'
+            'Data dikirim ke ESP32',
           ),
           backgroundColor: Colors.green,
-          duration: const Duration(seconds: 4),
+          duration: const Duration(seconds: 3),
         ),
       );
 
@@ -86,7 +78,7 @@ class _CalibrationPageState extends State<CalibrationPage> {
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error: $e'),
+          content: Text('Error: Masukkan nilai yang valid'),
           backgroundColor: Colors.red,
         ),
       );
@@ -108,7 +100,7 @@ class _CalibrationPageState extends State<CalibrationPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Kalibrasi Sensor Cahaya
+            // Info BH1750
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -123,7 +115,7 @@ class _CalibrationPageState extends State<CalibrationPage> {
                       Icon(Icons.wb_sunny, color: Colors.orange[700]),
                       const SizedBox(width: 8),
                       const Text(
-                        'Kalibrasi Sensor Cahaya',
+                        'Sensor Cahaya BH1750',
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
@@ -131,61 +123,20 @@ class _CalibrationPageState extends State<CalibrationPage> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 12),
                   const Text(
-                    'Gunakan Lux Meter untuk mendapatkan nilai aktual',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                    '✓ Sensor digital dengan akurasi tinggi',
+                    style: TextStyle(fontSize: 14),
                   ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _lightSensorController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Nilai ADC Sensor',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: _lightActualController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Lux Meter (Lux)',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.add_circle),
-                        color: Colors.green,
-                        onPressed: _addLightCalibrationPoint,
-                      ),
-                    ],
+                  const SizedBox(height: 4),
+                  const Text(
+                    '✓ Sudah dikalibrasi pabrik',
+                    style: TextStyle(fontSize: 14),
                   ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    children: _lightPoints
-                        .asMap()
-                        .entries
-                        .map((entry) => Chip(
-                              label: Text(
-                                '${entry.value.sensorValue.toInt()} → ${entry.value.actualValue.toInt()} Lux',
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                              deleteIcon: const Icon(Icons.close, size: 16),
-                              onDeleted: () {
-                                setState(() {
-                                  _lightPoints.removeAt(entry.key);
-                                });
-                              },
-                            ))
-                        .toList(),
+                  const SizedBox(height: 4),
+                  const Text(
+                    '✓ Tidak perlu kalibrasi manual',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.green),
                   ),
                 ],
               ),
@@ -216,61 +167,50 @@ class _CalibrationPageState extends State<CalibrationPage> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 12),
                   const Text(
-                    'Gunakan Soil Moisture Meter untuk nilai aktual',
+                    'Masukkan nilai sensor saat kondisi DRY dan WET',
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                   const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _moistureSensorController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Nilai ADC Sensor',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: _moistureActualController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Soil Meter (%)',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.add_circle),
-                        color: Colors.green,
-                        onPressed: _addMoistureCalibrationPoint,
-                      ),
-                    ],
+                  
+                  // Soil DRY Value
+                  const Text(
+                    'Nilai Sensor DRY (di udara):',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    children: _moisturePoints
-                        .asMap()
-                        .entries
-                        .map((entry) => Chip(
-                              label: Text(
-                                '${entry.value.sensorValue.toInt()} → ${entry.value.actualValue.toInt()}%',
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                              deleteIcon: const Icon(Icons.close, size: 16),
-                              onDeleted: () {
-                                setState(() {
-                                  _moisturePoints.removeAt(entry.key);
-                                });
-                              },
-                            ))
-                        .toList(),
+                  TextField(
+                    controller: _soilDryController,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      labelText: 'Nilai ADC saat kering (0-4095)',
+                      hintText: '4095',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      prefixIcon: Icon(Icons.air, color: Colors.grey[600]),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // Soil WET Value
+                  const Text(
+                    'Nilai Sensor WET (di dalam air):',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _soilWetController,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      labelText: 'Nilai ADC saat basah (0-4095)',
+                      hintText: '1500',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      prefixIcon: Icon(Icons.water, color: Colors.blue[700]),
+                    ),
                   ),
                 ],
               ),
@@ -302,11 +242,12 @@ class _CalibrationPageState extends State<CalibrationPage> {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    '1. Minimal 2 titik pengukuran untuk setiap sensor\n'
-                    '2. Gunakan kondisi yang berbeda (terang-gelap, basah-kering)\n'
-                    '3. Sensor Cahaya: Ukur di tempat gelap dan terang dengan Lux Meter\n'
-                    '4. Kelembaban Tanah: Ukur di udara (kering) dan dalam air (basah)\n'
-                    '5. Lebih banyak titik = kalibrasi lebih akurat',
+                    '1. Sensor Cahaya BH1750 sudah dikalibrasi dari pabrik\n'
+                    '2. Sensor Kelembaban Tanah perlu kalibrasi 2 nilai:\n'
+                    '   • DRY: Angkat sensor di udara, catat nilai ADC\n'
+                    '   • WET: Celupkan sensor di air, catat nilai ADC\n'
+                    '3. Nilai DRY harus lebih besar dari nilai WET\n'
+                    '4. Setelah input, tekan "Terapkan Kalibrasi"',
                     style: TextStyle(fontSize: 12),
                   ),
                 ],
@@ -345,10 +286,8 @@ class _CalibrationPageState extends State<CalibrationPage> {
 
   @override
   void dispose() {
-    _lightSensorController.dispose();
-    _lightActualController.dispose();
-    _moistureSensorController.dispose();
-    _moistureActualController.dispose();
+    _soilDryController.dispose();
+    _soilWetController.dispose();
     super.dispose();
   }
 }

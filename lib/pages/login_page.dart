@@ -257,7 +257,7 @@ class _LoginPageState extends State<LoginPage> {
                       Icon(Icons.info_outline, color: Colors.white70, size: 16),
                       SizedBox(width: 8),
                       Text(
-                        'Masukkan username dan password yang benar untuk mengakses aplikasi.',
+                        'Masukkan username dan password yang benar.',
                         style: TextStyle(
                           color: Colors.white70,
                           fontSize: 12,

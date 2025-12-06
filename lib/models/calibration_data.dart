@@ -9,6 +9,10 @@ class CalibrationData {
   final double moistureSlopeA;
   final double moistureInterceptB;
 
+  // Raw ADC values untuk ESP32 (capacitive soil sensor)
+  final int soilDryValue; // ADC value saat kering (udara) ~4095
+  final int soilWetValue; // ADC value saat basah (air) ~1500
+
   // Data mentah untuk referensi (opsional)
   final List<CalibrationPoint>? lightCalibrationPoints;
   final List<CalibrationPoint>? moistureCalibrationPoints;
@@ -18,6 +22,8 @@ class CalibrationData {
     required this.lightInterceptB,
     required this.moistureSlopeA,
     required this.moistureInterceptB,
+    this.soilDryValue = 4095,
+    this.soilWetValue = 1500,
     this.lightCalibrationPoints,
     this.moistureCalibrationPoints,
   });
@@ -81,10 +87,7 @@ class CalibrationData {
     double slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
     double intercept = (sumY - slope * sumX) / n;
 
-    return {
-      'slope': slope,
-      'intercept': intercept,
-    };
+    return {'slope': slope, 'intercept': intercept};
   }
 
   // Kalibrasikan nilai sensor cahaya ke Lux
@@ -109,6 +112,8 @@ class CalibrationData {
       'lightInterceptB': lightInterceptB,
       'moistureSlopeA': moistureSlopeA,
       'moistureInterceptB': moistureInterceptB,
+      'soilDryValue': soilDryValue,
+      'soilWetValue': soilWetValue,
     };
   }
 
@@ -119,6 +124,8 @@ class CalibrationData {
       lightInterceptB: json['lightInterceptB']?.toDouble() ?? 10000,
       moistureSlopeA: json['moistureSlopeA']?.toDouble() ?? 0.2,
       moistureInterceptB: json['moistureInterceptB']?.toDouble() ?? -60,
+      soilDryValue: json['soilDryValue']?.toInt() ?? 4095,
+      soilWetValue: json['soilWetValue']?.toInt() ?? 1500,
     );
   }
 }
@@ -126,18 +133,13 @@ class CalibrationData {
 // Data point untuk kalibrasi
 class CalibrationPoint {
   final double sensorValue; // Nilai ADC dari sensor
-  final double actualValue; // Nilai aktual dari alat ukur (Lux Meter/Soil Meter)
+  final double
+  actualValue; // Nilai aktual dari alat ukur (Lux Meter/Soil Meter)
 
-  CalibrationPoint({
-    required this.sensorValue,
-    required this.actualValue,
-  });
+  CalibrationPoint({required this.sensorValue, required this.actualValue});
 
   Map<String, dynamic> toJson() {
-    return {
-      'sensorValue': sensorValue,
-      'actualValue': actualValue,
-    };
+    return {'sensorValue': sensorValue, 'actualValue': actualValue};
   }
 
   factory CalibrationPoint.fromJson(Map<String, dynamic> json) {

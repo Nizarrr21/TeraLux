@@ -1,42 +1,64 @@
 class PumpControl {
-  final bool isPumpOn;
-  final bool isAutoMode;
-  final int duration;
+  final bool isRunning;
+  final int remainingSeconds;
+  final bool manual;
 
   PumpControl({
-    required this.isPumpOn,
-    required this.isAutoMode,
-    required this.duration,
+    required this.isRunning,
+    this.remainingSeconds = 0,
+    this.manual = false,
   });
 
-  // Factory constructor untuk parsing dari MQTT JSON
+  // Factory constructor untuk parsing dari ESP32 status
   factory PumpControl.fromJson(Map<String, dynamic> json) {
     return PumpControl(
-      isPumpOn: json['isPumpOn'] ?? false,
-      isAutoMode: json['isAutoMode'] ?? true,
-      duration: json['duration'] ?? 5,
+      isRunning: json['isRunning'] ?? false,
+      remainingSeconds: json['remainingSeconds'] ?? 0,
+      manual: json['manual'] ?? false,
     );
   }
 
-  // Convert ke JSON untuk mengirim ke Arduino via MQTT
+  // Convert ke JSON untuk mengirim control command ke ESP32
+  // mode: "start" or "stop"
+  // duration: seconds (only for start)
+  // manual: true untuk manual mode, false untuk auto
+  Map<String, dynamic> toControlJson({
+    required String mode,
+    int duration = 30,
+    bool manual = false,
+  }) {
+    if (mode == "start") {
+      return {
+        'mode': 'start',
+        'duration': duration,
+        'manual': manual,
+      };
+    } else {
+      return {
+        'mode': 'stop',
+      };
+    }
+  }
+
+  // Convert status ke JSON (untuk internal use)
   Map<String, dynamic> toJson() {
     return {
-      'isPumpOn': isPumpOn,
-      'isAutoMode': isAutoMode,
-      'duration': duration,
+      'isRunning': isRunning,
+      'remainingSeconds': remainingSeconds,
+      'manual': manual,
     };
   }
 
   // Copy with method untuk update state
   PumpControl copyWith({
-    bool? isPumpOn,
-    bool? isAutoMode,
-    int? duration,
+    bool? isRunning,
+    int? remainingSeconds,
+    bool? manual,
   }) {
     return PumpControl(
-      isPumpOn: isPumpOn ?? this.isPumpOn,
-      isAutoMode: isAutoMode ?? this.isAutoMode,
-      duration: duration ?? this.duration,
+      isRunning: isRunning ?? this.isRunning,
+      remainingSeconds: remainingSeconds ?? this.remainingSeconds,
+      manual: manual ?? this.manual,
     );
   }
 }
