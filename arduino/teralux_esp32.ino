@@ -15,8 +15,7 @@ const int mqtt_port = 1883;
 const char* mqtt_user = "";
 const char* mqtt_password = "";
 
-// MQTT Topics - GUNAKAN PREFIX UNIK AGAR TIDAK BENTROK!
-// Ganti "nizarrr" dengan nama Anda untuk membuat topic unik
+// MQTT Topics
 const char* topic_sensors = "teralux_project/sensors";
 const char* topic_pump_control = "teralux_project/pump/control";
 const char* topic_pump_status = "teralux_project/pump/status";
@@ -26,29 +25,37 @@ const char* topic_threshold_settings = "teralux_project/settings/threshold";
 const char* topic_calibration = "teralux_project/settings/calibration";
 
 // ===== Pin Configuration (ESP32) =====
-// I2C Configuration untuk BH1750 dan LCD
-#define I2C_SDA 21          // Pin SDA untuk BH1750 & LCD (bisa diubah: 21, 33, dll)
-#define I2C_SCL 22          // Pin SCL untuk BH1750 & LCD (bisa diubah: 22, 32, dll)
+// I2C Bus 0 (Default Wire) - Untuk LCD 16x2
+#define I2C0_SDA 21         // SDA untuk LCD (pin default ESP32)
+#define I2C0_SCL 22         // SCL untuk LCD (pin default ESP32)
+
+// I2C Bus 1 (Wire1) - Untuk BH1750 Light Sensor
+#define I2C1_SDA 32         // SDA untuk BH1750
+#define I2C1_SCL 33         // SCL untuk BH1750
 
 // I2C Device Addresses
 #define BH1750_ADDRESS 0x23 // Alamat I2C BH1750 (default: 0x23, atau 0x5C)
 #define LCD_ADDRESS 0x27    // Alamat I2C LCD (default: 0x27, atau 0x3F)
 
 // Sensor & Actuator Pins
-#define SOIL_PIN 25        // Pin ADC untuk soil moisture sensor
+#define SOIL_PIN 25         // Pin ADC untuk soil moisture sensor (ADC1_CH6)
 #define PUMP_RELAY_PIN 26   // Pin relay pompa air
 #define LIGHT_RELAY_PIN 27  // Pin relay lampu
 #define STATUS_LED_PIN 2    // Pin LED status built-in
 
 // ===== Sensor Objects =====
-BH1750 lightMeter(BH1750_ADDRESS);           // BH1750 dengan alamat yang bisa dikonfigurasi
-LiquidCrystal_I2C lcd(LCD_ADDRESS, 16, 2);   // LCD dengan alamat yang bisa dikonfigurasi
+TwoWire I2C_BH1750 = TwoWire(1);  // I2C Bus 1 untuk BH1750
+// Wire (default) akan digunakan untuk LCD
+
+BH1750 lightMeter(BH1750_ADDRESS);
+LiquidCrystal_I2C lcd(LCD_ADDRESS, 16, 2);  // LCD menggunakan Wire default
 WiFiClient espClient;
 PubSubClient client(espClient);
 
 // ===== Global Variables =====
 float lightLevel = 0.0;
 int rawMoistureValue = 0;
+float moisturePercent = 0.0;  // Tambahan untuk menyimpan kelembapan
 bool bh1750_initialized = false;
 bool lcd_initialized = false;
 
@@ -112,7 +119,7 @@ void setup() {
   
   Serial.println("\n\n=================================");
   Serial.println("  TeraLux ESP32 Controller");
-  Serial.println("  WITH LCD v2.1");
+  Serial.println("  SEPARATE I2C v3.1");
   Serial.println("=================================\n");
   
   // Initialize pins
@@ -135,20 +142,56 @@ void setup() {
   Serial.println("[2] ADC configured (12-bit, 0-3.3V)");
   
   // Test soil sensor
-  Serial.print("[2a] Testing soil sensor on pin ");
+  Serial.print("[2a] Testing soil sensor on GPIO");
   Serial.print(SOIL_PIN);
   Serial.print("... ");
-  int testRead = analogRead(SOIL_PIN);
+  
+  // Read multiple times untuk stabilitas
+  long sum = 0;
+  for (int i = 0; i < 20; i++) {
+    sum += analogRead(SOIL_PIN);
+    delay(10);
+  }
+  int testRead = sum / 20;
+  
+  Serial.print("ADC = ");
   Serial.print(testRead);
+  
+  // Hitung kelembapan langsung
+  float testMoisture = map(testRead, soilWetValue, soilDryValue, 100, 0);
+  testMoisture = constrain(testMoisture, 0, 100);
+  
+  Serial.print(" → Moisture: ");
+  Serial.print(testMoisture, 1);
+  Serial.print("%");
+  
   if (testRead == 0) {
     Serial.println(" ⚠️  WARNING: Reading 0! Check wiring!");
+  } else if (testMoisture <= 10) {
+    Serial.println(" (Sangat Kering)");
+  } else if (testMoisture <= 30) {
+    Serial.println(" (Kering)");
+  } else if (testMoisture <= 60) {
+    Serial.println(" (Normal)");
   } else {
-    Serial.println(" ✓ OK");
+    Serial.println(" (Basah)");
   }
   
-  // Initialize I2C
-  Wire.begin(I2C_SDA, I2C_SCL);
-  Serial.println("[3] I2C initialized");
+  // Initialize I2C Bus 0 (Default Wire) untuk LCD
+  Wire.begin(I2C0_SDA, I2C0_SCL);
+  Serial.print("[3] I2C Bus 0 (Wire) initialized (SDA:");
+  Serial.print(I2C0_SDA);
+  Serial.print(", SCL:");
+  Serial.print(I2C0_SCL);
+  Serial.println(") - FOR LCD");
+  
+  // Initialize I2C Bus 1 untuk BH1750
+  I2C_BH1750.begin(I2C1_SDA, I2C1_SCL, 100000);
+  Serial.print("[4] I2C Bus 1 (Wire1) initialized (SDA:");
+  Serial.print(I2C1_SDA);
+  Serial.print(", SCL:");
+  Serial.print(I2C1_SCL);
+  Serial.println(") - FOR BH1750");
   
   // Initialize LCD
   initLCD();
@@ -181,13 +224,24 @@ void setup() {
   Serial.print(lightLevelMin);
   Serial.println(" Lux");
   Serial.println();
+  
+  Serial.println("📍 PIN MAPPING:");
+  Serial.print("   LCD    - I2C0 (Wire): SDA=GPIO");
+  Serial.print(I2C0_SDA);
+  Serial.print(", SCL=GPIO");
+  Serial.println(I2C0_SCL);
+  Serial.print("   BH1750 - I2C1 (Wire1): SDA=GPIO");
+  Serial.print(I2C1_SDA);
+  Serial.print(", SCL=GPIO");
+  Serial.println(I2C1_SCL);
+  Serial.println();
 }
 
 // ===== Initialize LCD =====
 void initLCD() {
-  Serial.print("[4] Initializing LCD at 0x");
+  Serial.print("[5] Initializing LCD at 0x");
   Serial.print(LCD_ADDRESS, HEX);
-  Serial.print("... ");
+  Serial.print(" on I2C Bus 0 (Wire)... ");
   
   // Check if LCD is connected
   Wire.beginTransmission(LCD_ADDRESS);
@@ -197,7 +251,7 @@ void initLCD() {
     Serial.print("✗ NOT FOUND (I2C error: ");
     Serial.print(error);
     Serial.println(")");
-    Serial.println("    Try changing LCD_ADDRESS to 0x3F or run I2C scanner");
+    Serial.println("    Try changing LCD_ADDRESS to 0x3F");
     lcd_initialized = false;
     return;
   }
@@ -206,9 +260,9 @@ void initLCD() {
   lcd.backlight();
   
   lcd.setCursor(0, 0);
-  lcd.print("  TeraLux v2.1  ");
+  lcd.print("  TeraLux v3.1  ");
   lcd.setCursor(0, 1);
-  lcd.print("  Initializing  ");
+  lcd.print(" Separate I2C  ");
   
   delay(2000);
   
@@ -218,24 +272,25 @@ void initLCD() {
 
 // ===== Initialize BH1750 =====
 void initBH1750() {
-  Serial.print("[5] Initializing BH1750 at 0x");
+  Serial.print("[6] Initializing BH1750 at 0x");
   Serial.print(BH1750_ADDRESS, HEX);
-  Serial.print("... ");
+  Serial.print(" on I2C Bus 1 (Wire1)... ");
   
-  Wire.beginTransmission(BH1750_ADDRESS);
-  byte error = Wire.endTransmission();
+  I2C_BH1750.beginTransmission(BH1750_ADDRESS);
+  byte error = I2C_BH1750.endTransmission();
   
   if (error != 0) {
     Serial.print("✗ NOT FOUND (I2C error: ");
     Serial.print(error);
     Serial.println(")");
+    Serial.println("    ⚠️  BH1750 tidak terpasang - sistem akan jalan tanpa sensor cahaya");
     bh1750_initialized = false;
     return;
   }
   
   delay(10);
   
-  if (lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE)) {
+  if (lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, BH1750_ADDRESS, &I2C_BH1750)) {
     Serial.println("✓ OK");
     bh1750_initialized = true;
     
@@ -246,6 +301,7 @@ void initBH1750() {
     Serial.println(" Lux");
   } else {
     Serial.println("✗ FAILED!");
+    Serial.println("    ⚠️  BH1750 gagal init - sistem akan jalan tanpa sensor cahaya");
     bh1750_initialized = false;
   }
 }
@@ -256,51 +312,49 @@ void updateLCD() {
   
   lcd.clear();
   
-  float moisturePercent = map(rawMoistureValue, soilWetValue, soilDryValue, 100, 0);
-  moisturePercent = constrain(moisturePercent, 0, 100);
-  
   if (lcdPage == 0) {
-    // Page 0: Sensor readings
+    // Page 0: Sensor readings - KELEMBAPAN SAJA
     lcd.setCursor(0, 0);
-    lcd.print("L:");
+    lcd.print("Light: ");
     lcd.print((int)lightLevel);
-    lcd.print("lx");
+    lcd.print(" lx");
     
-    lcd.setCursor(9, 0);
-    lcd.print("M:");
+    lcd.setCursor(0, 1);
+    lcd.print("Moisture: ");
     lcd.print((int)moisturePercent);
     lcd.print("%");
     
-    lcd.setCursor(0, 1);
+  } else if (lcdPage == 1) {
+    // Page 1: Status & Connection
+    lcd.setCursor(0, 0);
     if (pumpIsRunning) {
       unsigned long remaining = (pumpDuration - (millis() - pumpStartTime)) / 1000;
-      lcd.print("PUMP:");
+      lcd.print("PUMP: ");
       lcd.print(remaining);
       lcd.print("s    ");
     } else {
-      lcd.print("WiFi:");
-      lcd.print(WiFi.status() == WL_CONNECTED ? "OK" : "NO");
-      
-      lcd.setCursor(9, 1);
-      lcd.print("MQTT:");
-      lcd.print(client.connected() ? "OK" : "NO");
+      lcd.print("Pump: ");
+      lcd.print(pumpIsRunning ? "ON " : "OFF");
+      lcd.print(" Lt:");
+      lcd.print(lightIsOn ? "ON" : "OFF");
     }
     
-  } else if (lcdPage == 1) {
-    // Page 1: Status
-    lcd.setCursor(0, 0);
-    lcd.print("Pump:");
-    lcd.print(pumpIsRunning ? "ON " : "OFF");
+    lcd.setCursor(0, 1);
+    lcd.print("WiFi:");
+    lcd.print(WiFi.status() == WL_CONNECTED ? "OK" : "NO");
+    lcd.print(" MQTT:");
+    lcd.print(client.connected() ? "OK" : "NO");
     
-    lcd.setCursor(10, 0);
-    lcd.print("Lt:");
-    lcd.print(lightIsOn ? "ON" : "OFF");
+  } else if (lcdPage == 2) {
+    // Page 2: Auto Control Status
+    lcd.setCursor(0, 0);
+    lcd.print("Auto Control");
     
     lcd.setCursor(0, 1);
-    lcd.print("Auto:W");
-    lcd.print(autoWateringEnabled ? "Y" : "N");
-    lcd.print(" L");
-    lcd.print(autoLightingEnabled ? "Y" : "N");
+    lcd.print("Water:");
+    lcd.print(autoWateringEnabled ? "ON" : "OFF");
+    lcd.print(" Lt:");
+    lcd.print(autoLightingEnabled ? "ON" : "OFF");
   }
 }
 
@@ -309,10 +363,17 @@ void loop() {
   unsigned long currentMillis = millis();
   
   // Try to reinitialize BH1750 if failed
-  if (!bh1750_initialized && (currentMillis - lastBH1750Retry >= bh1750RetryInterval)) {
+  static int bh1750RetryCount = 0;
+  if (!bh1750_initialized && bh1750RetryCount < 3 && (currentMillis - lastBH1750Retry >= bh1750RetryInterval)) {
     lastBH1750Retry = currentMillis;
-    Serial.println("\n[!] Retrying BH1750 initialization...");
+    bh1750RetryCount++;
+    Serial.print("\n[!] Retrying BH1750 initialization (attempt ");
+    Serial.print(bh1750RetryCount);
+    Serial.println("/3)...");
     initBH1750();
+    if (!bh1750_initialized && bh1750RetryCount >= 3) {
+      Serial.println("    ℹ️  Giving up on BH1750 - continuing without light sensor");
+    }
   }
   
   // Maintain MQTT connection
@@ -341,12 +402,12 @@ void loop() {
     lastLcdUpdate = currentMillis;
     updateLCD();
     
-    // Toggle page every 5 seconds
+    // Toggle page every 5 seconds (3 pages)
     static int pageCounter = 0;
     pageCounter++;
     if (pageCounter >= 5) {
       pageCounter = 0;
-      lcdPage = (lcdPage + 1) % 2;
+      lcdPage = (lcdPage + 1) % 3;  // 3 pages: 0, 1, 2
     }
   }
   
@@ -369,7 +430,7 @@ void loop() {
 
 // ===== WiFi Connection =====
 void setup_wifi() {
-  Serial.print("[6] Connecting to WiFi: ");
+  Serial.print("[8] Connecting to WiFi: ");
   Serial.println(ssid);
   
   if (lcd_initialized) {
@@ -394,7 +455,7 @@ void setup_wifi() {
   }
   
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n[6] WiFi connected!");
+    Serial.println("\n[8] WiFi connected!");
     Serial.print("    IP: ");
     Serial.println(WiFi.localIP());
     Serial.print("    RSSI: ");
@@ -410,7 +471,7 @@ void setup_wifi() {
       delay(2000);
     }
   } else {
-    Serial.println("\n[6] WiFi FAILED!");
+    Serial.println("\n[8] WiFi FAILED!");
     
     if (lcd_initialized) {
       lcd.clear();
@@ -563,7 +624,6 @@ void callback(char* topic, byte* payload, unsigned int length) {
       int newDryValue = doc["soilDryValue"].as<int>();
       int newWetValue = doc["soilWetValue"].as<int>();
       
-      // Validasi: dry value harus lebih besar dari wet value
       if (newDryValue > newWetValue && newDryValue <= 4095 && newWetValue >= 0) {
         soilDryValue = newDryValue;
         soilWetValue = newWetValue;
@@ -573,32 +633,15 @@ void callback(char* topic, byte* payload, unsigned int length) {
         Serial.println(soilDryValue);
         Serial.print("   📊 Soil Wet Value (100%): ");
         Serial.println(soilWetValue);
-        Serial.print("   ✓ Range: ");
-        Serial.print(soilWetValue);
-        Serial.print(" - ");
-        Serial.print(soilDryValue);
-        Serial.print(" (span: ");
-        Serial.print(soilDryValue - soilWetValue);
-        Serial.println(")");
         
-        // Baca sensor untuk test kalkulasi baru
         rawMoistureValue = analogRead(SOIL_PIN);
         float testMoisture = map(rawMoistureValue, soilWetValue, soilDryValue, 100, 0);
         testMoisture = constrain(testMoisture, 0, 100);
-        Serial.print("   🧪 Test calculation - Raw: ");
+        Serial.print("   🧪 Test - Raw: ");
         Serial.print(rawMoistureValue);
         Serial.print(" → Moisture: ");
         Serial.print(testMoisture);
         Serial.println("%");
-        Serial.println();
-      } else {
-        Serial.println("\n⚠️  CALIBRATION INVALID!");
-        Serial.print("   Dry: ");
-        Serial.print(newDryValue);
-        Serial.print(", Wet: ");
-        Serial.println(newWetValue);
-        Serial.println("   Requirements: Dry > Wet, Dry ≤ 4095, Wet ≥ 0");
-        Serial.println();
       }
     }
   }
@@ -611,7 +654,7 @@ void readSensors() {
     lightLevel = lightMeter.readLightLevel();
     
     if (lightLevel < 0) {
-      Serial.println("⚠️  BH1750 read error, reinitializing...");
+      Serial.println("⚠️  BH1750 read error");
       bh1750_initialized = false;
       lightLevel = 0;
     }
@@ -619,51 +662,62 @@ void readSensors() {
     lightLevel = 0;
   }
   
-  // Read Soil Moisture with averaging
+  // Read Soil Moisture with averaging (20 samples untuk stabilitas)
   long sum = 0;
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < 20; i++) {
     sum += analogRead(SOIL_PIN);
     delay(10);
   }
-  rawMoistureValue = sum / 10;
+  rawMoistureValue = sum / 20;
   
-  float moisturePercent = map(rawMoistureValue, soilWetValue, soilDryValue, 100, 0);
+  // Hitung kelembapan dalam persen
+  moisturePercent = map(rawMoistureValue, soilWetValue, soilDryValue, 100, 0);
   moisturePercent = constrain(moisturePercent, 0, 100);
   
-  Serial.print("💡 ");
+  // Tampilkan KELEMBAPAN saja (bukan raw value)
+  Serial.print("💡 Light: ");
   Serial.print(lightLevel, 0);
-  Serial.print(" Lux | 💧 ");
-  Serial.print(rawMoistureValue);
-  Serial.print(" (");
-  Serial.print(moisturePercent, 0);
-  Serial.println("%)");
+  Serial.print(" Lux | 💧 Moisture: ");
+  Serial.print(moisturePercent, 1);
+  Serial.print("% ");
+  
+  // Status kelembapan
+  if (moisturePercent <= 10) {
+    Serial.println("(Sangat Kering)");
+  } else if (moisturePercent <= 30) {
+    Serial.println("(Kering)");
+  } else if (moisturePercent <= 60) {
+    Serial.println("(Normal)");
+  } else if (moisturePercent <= 80) {
+    Serial.println("(Lembab)");
+  } else {
+    Serial.println("(Basah)");
+  }
 }
 
 // ===== Publish Sensor Data =====
 void publishSensorData() {
   StaticJsonDocument<256> doc;
   
-  float moisturePercent = map(rawMoistureValue, soilWetValue, soilDryValue, 100, 0);
-  moisturePercent = constrain(moisturePercent, 0, 100);
+  // Gunakan moisturePercent global yang sudah dihitung
+  float finalMoisture = moisturePercent;
   
+  // Override jika ada kalibrasi slope/intercept
   if (moistureSlope != 1.0 || moistureIntercept != 0.0) {
-    moisturePercent = rawMoistureValue * moistureSlope + moistureIntercept;
-    moisturePercent = constrain(moisturePercent, 0, 100);
+    finalMoisture = rawMoistureValue * moistureSlope + moistureIntercept;
+    finalMoisture = constrain(finalMoisture, 0, 100);
   }
   
   doc["lightLevel"] = round(lightLevel);
   doc["rawMoistureValue"] = rawMoistureValue;
-  doc["moistureLevel"] = round(moisturePercent);
+  doc["moistureLevel"] = round(finalMoisture);
   doc["timestamp"] = millis();
   
   char buffer[256];
   serializeJson(doc, buffer);
   
-  // Publish dengan RETAINED flag agar Flutter dapat data saat subscribe
   if (client.publish(topic_sensors, buffer, true)) {
-    Serial.println("📤 Published to MQTT (retained)");
-  } else {
-    Serial.println("📤 Publish failed");
+    Serial.println("📤 Published to MQTT");
   }
 }
 
@@ -684,7 +738,6 @@ void handlePumpControl() {
       digitalWrite(PUMP_RELAY_PIN, HIGH);
       
       Serial.println("💧 Pump timer finished");
-      
       publishPumpStatus();
     }
   }
@@ -707,7 +760,6 @@ void publishPumpStatus() {
   
   char buffer[128];
   serializeJson(doc, buffer);
-  
   client.publish(topic_pump_status, buffer, true);
 }
 
@@ -720,7 +772,6 @@ void publishLightStatus() {
   
   char buffer[64];
   serializeJson(doc, buffer);
-  
   client.publish(topic_light_status, buffer, true);
 }
 
@@ -728,9 +779,10 @@ void publishLightStatus() {
 void checkAutoControl() {
   float currentLight = lightLevel;
   
-  float currentMoisture = map(rawMoistureValue, soilWetValue, soilDryValue, 100, 0);
-  currentMoisture = constrain(currentMoisture, 0, 100);
+  // Gunakan moisturePercent global yang sudah dihitung
+  float currentMoisture = moisturePercent;
   
+  // Override jika ada kalibrasi slope/intercept
   if (moistureSlope != 1.0 || moistureIntercept != 0.0) {
     currentMoisture = rawMoistureValue * moistureSlope + moistureIntercept;
     currentMoisture = constrain(currentMoisture, 0, 100);
@@ -738,12 +790,17 @@ void checkAutoControl() {
   
   unsigned long currentTime = millis();
   
-  // Auto Watering (hanya jika tidak dalam mode manual)
+  // Auto Watering
   if (autoWateringEnabled && !pumpIsRunning && !pumpManualMode) {
     bool canWater = (currentTime - lastAutoWatering) > wateringCooldown;
     
     if (canWater && currentMoisture < soilMoistureMin) {
       Serial.println("\n🤖 AUTO WATERING!");
+      Serial.print("   Current moisture: ");
+      Serial.print(currentMoisture, 1);
+      Serial.print("% < ");
+      Serial.print(soilMoistureMin);
+      Serial.println("%");
       
       pumpIsRunning = true;
       pumpManualMode = false;
@@ -752,16 +809,20 @@ void checkAutoControl() {
       lastAutoWatering = currentTime;
       
       digitalWrite(PUMP_RELAY_PIN, LOW);
-      
       publishPumpStatus();
     }
   }
   
-  // Auto Lighting (hanya jika tidak dalam mode manual)
+  // Auto Lighting
   if (autoLightingEnabled && !lightManualMode) {
     if (currentLight < lightLevelMin) {
       if (!lightIsOn) {
         Serial.println("\n🤖 AUTO LIGHT ON!");
+        Serial.print("   Current light: ");
+        Serial.print(currentLight, 0);
+        Serial.print(" lux < ");
+        Serial.print(lightLevelMin);
+        Serial.println(" lux");
         
         lightIsOn = true;
         lightManualMode = false;
@@ -771,6 +832,11 @@ void checkAutoControl() {
     } else {
       if (lightIsOn) {
         Serial.println("\n🤖 AUTO LIGHT OFF!");
+        Serial.print("   Current light: ");
+        Serial.print(currentLight, 0);
+        Serial.print(" lux >= ");
+        Serial.print(lightLevelMin);
+        Serial.println(" lux");
         
         lightIsOn = false;
         lightManualMode = false;
